@@ -1,28 +1,42 @@
-﻿name: Sync Contract Bindings
+name: Sync Contract Bindings
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # Nightly at 2am UTC
-  workflow_dispatch:       # Allow manual trigger
+    - cron: '0 2 * * *' # Nightly at 2am UTC
+  workflow_dispatch: # Allow manual trigger
+
+# Required to push branches and open PRs
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Stellar CLI
-        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.stellar.org | bash
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v3
         with:
           version: 9
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
 
-      - run: pnpm install
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Stellar CLI
+        run: |
+          # Install Stellar CLI via cargo (most reliable on ubuntu-latest)
+          wget -q https://github.com/stellar/stellar-cli/releases/latest/download/stellar-cli-$(uname -m)-unknown-linux-gnu.tar.gz -O stellar-cli.tar.gz || \
+          curl -sSL https://raw.githubusercontent.com/stellar/stellar-cli/main/install.sh | bash
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          stellar --version
 
       - name: Regenerate Bindings
         env:
@@ -54,3 +68,7 @@ jobs:
             Please review the diff in `src/contracts/generated/` and merge if correct.
           branch: chore/sync-bindings
           labels: chore,automated
+
+      - name: No changes detected
+        if: steps.diff.outputs.changed == 'false'
+        run: echo "Bindings are already up to date. No PR needed."
