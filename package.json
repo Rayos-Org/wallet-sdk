@@ -47,7 +47,7 @@
                 },
     "types":  "./dist/index.d.ts",
     "engines":  {
-                    "node":  "\u003e=20"
+                    "node":  "\u003e=24"
                 },
     "author":  "Rayos Org",
     "homepage":  "https://github.com/Rayos-Org/wallet-sdk#readme",
@@ -62,7 +62,7 @@
                     "build":  "tsup",
                     "typecheck":  "tsc --noEmit",
                     "lint":  "eslint .",
-                    "release":  "pnpm build \u0026\u0026 changeset publish",
+                    "release":  "pnpm build \u0026\u0026 pnpm changeset publish",
                     "changeset":  "changeset",
                     "test":  "vitest run"
                 }
