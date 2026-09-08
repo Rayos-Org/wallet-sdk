@@ -1,11 +1,12 @@
-﻿# `@rayos/wallet-sdk`
+# `@rayos/wallet-sdk`
 
 > The official TypeScript SDK for interacting with **Guardian Wallet** — a passkey-secured, policy-governed smart wallet on the Stellar network.
 
 [![CI](https://github.com/Rayos-Org/wallet-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/Rayos-Org/wallet-sdk/actions/workflows/ci.yml)
+[![Release](https://github.com/Rayos-Org/wallet-sdk/actions/workflows/release.yml/badge.svg)](https://github.com/Rayos-Org/wallet-sdk/actions/workflows/release.yml)
+[![Sync Bindings](https://github.com/Rayos-Org/wallet-sdk/actions/workflows/sync-bindings.yml/badge.svg)](https://github.com/Rayos-Org/wallet-sdk/actions/workflows/sync-bindings.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![npm version](https://img.shields.io/npm/v/@rayos/wallet-sdk.svg)](https://www.npmjs.com/package/@rayos/wallet-sdk)
-
 ---
 
 ## What Is This?
@@ -45,6 +46,8 @@ wallet-contracts  ──generates──►  wallet-sdk  ──used by──►  
 ## Quick Start
 
 ### Installation
+
+The package is officially published on npm as [`@rayos/wallet-sdk`](https://www.npmjs.com/package/@rayos/wallet-sdk).
 
 ```bash
 npm install @rayos/wallet-sdk

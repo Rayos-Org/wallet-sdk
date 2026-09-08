@@ -1,4 +1,4 @@
-name: Sync Contract Bindings
+﻿name: Sync Contract Bindings
 
 on:
   schedule:
@@ -44,7 +44,12 @@ jobs:
           FACTORY_CONTRACT_ADDRESS: ${{ secrets.FACTORY_CONTRACT_ADDRESS }}
           POLICY_CONTRACT_ADDRESS: ${{ secrets.POLICY_CONTRACT_ADDRESS }}
           NETWORK: testnet
-        run: bash scripts/regenerate-bindings.sh
+        run: |
+          if [ -z "$WALLET_CONTRACT_ADDRESS" ]; then
+            echo "Secrets not set. Skipping."
+            exit 0
+          fi
+          bash scripts/regenerate-bindings.sh
 
       - name: Check for changes
         id: diff
