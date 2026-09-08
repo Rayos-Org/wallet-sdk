@@ -1,0 +1,76 @@
+﻿name: Bug Report
+description: Report a bug or unexpected behavior in wallet-sdk
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the fields below as completely as possible.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: "When I call sdk.createWallet(), it throws..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Paste the smallest possible code snippet that reproduces the issue.
+      render: typescript
+    validations:
+      required: true
+
+  - type: dropdown
+    id: sdk-version
+    attributes:
+      label: SDK Version
+      options:
+        - "1.x (latest)"
+        - "Other (specify in description)"
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js Version
+      placeholder: "e.g. 20.15.0"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      placeholder: "e.g. macOS 14, Windows 11, Ubuntu 22.04"
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser (if applicable)
+      placeholder: "e.g. Chrome 127, Safari 18"
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate
+          required: true
+        - label: I am not reporting a security vulnerability (use SECURITY.md for that)
+          required: true

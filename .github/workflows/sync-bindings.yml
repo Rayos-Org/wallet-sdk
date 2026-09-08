@@ -1,0 +1,56 @@
+﻿name: Sync Contract Bindings
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Nightly at 2am UTC
+  workflow_dispatch:       # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Stellar CLI
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.stellar.org | bash
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install
+
+      - name: Regenerate Bindings
+        env:
+          WALLET_CONTRACT_ADDRESS: ${{ secrets.WALLET_CONTRACT_ADDRESS }}
+          FACTORY_CONTRACT_ADDRESS: ${{ secrets.FACTORY_CONTRACT_ADDRESS }}
+          POLICY_CONTRACT_ADDRESS: ${{ secrets.POLICY_CONTRACT_ADDRESS }}
+          NETWORK: testnet
+        run: bash scripts/regenerate-bindings.sh
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet src/contracts/generated/; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Open PR if bindings changed
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: sync contract bindings from wallet-contracts'
+          title: 'chore: sync contract bindings'
+          body: |
+            Automated PR: regenerated contract bindings from the latest deployed contracts.
+
+            Please review the diff in `src/contracts/generated/` and merge if correct.
+          branch: chore/sync-bindings
+          labels: chore,automated
