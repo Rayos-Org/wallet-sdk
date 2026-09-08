@@ -2,5 +2,5 @@
 dist/
 .env
 coverage/
-.DS_Store
+.cache/
 *.log
