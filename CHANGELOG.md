@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## 0.1.1
+
+### Patch Changes
+
+- 041d5a2: all check pass
+
 All notable changes to `@rayos/wallet-sdk` will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/) and uses [Changesets](https://github.com/changesets/changesets) for automated release management.
