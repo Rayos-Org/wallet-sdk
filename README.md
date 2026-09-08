@@ -7,6 +7,9 @@
 [![Sync Bindings](https://github.com/Rayos-Org/wallet-sdk/actions/workflows/sync-bindings.yml/badge.svg)](https://github.com/Rayos-Org/wallet-sdk/actions/workflows/sync-bindings.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![npm version](https://img.shields.io/npm/v/@rayos/wallet-sdk.svg)](https://www.npmjs.com/package/@rayos/wallet-sdk)
+
+📦 **[View `@rayos/wallet-sdk` on NPM](https://www.npmjs.com/package/@rayos/wallet-sdk)**
+
 ---
 
 ## What Is This?

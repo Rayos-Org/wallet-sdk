@@ -1,6 +1,5 @@
 ﻿# Architecture
 
-> **Source of truth:** [`wallet-sdk-ARCHITECTURE.md`](../wallet-sdk-ARCHITECTURE.md) contains the canonical architecture specification. This document expands on it with visual diagrams and implementation details.
 
 ---
 
