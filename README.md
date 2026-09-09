@@ -93,6 +93,7 @@ console.log(`Balance: ${state.balance}`);
 
 | Guide | Description |
 |---|---|
+| [Setup Guide (`SETUP.md`)](./SETUP.md) | Complete environment configuration, local development & bindings setup |
 | [Architecture](./docs/ARCHITECTURE.md) | System design, module map, key decisions |
 | [Getting Started](./docs/GETTING_STARTED.md) | Full setup guide, prerequisites, env config |
 | [API Reference](./docs/API_REFERENCE.md) | Complete public API documentation |
@@ -108,7 +109,7 @@ console.log(`Balance: ${state.balance}`);
 
 Before using or developing the SDK, ensure you have:
 
-- **Node.js ≥ 20 LTS**
+- **Node.js ≥ 20 LTS** (or `24.x LTS`)
 - **pnpm ≥ 9** — `npm install -g pnpm`
 - **Stellar CLI** — for regenerating contract bindings
 - A browser supporting **WebAuthn / Passkeys**
@@ -116,6 +117,8 @@ Before using or developing the SDK, ensure you have:
 ---
 
 ## Development Setup
+
+> 💡 For a detailed walkthrough on setting up contract bindings, environment variables, local package linking, and troubleshooting, see the [**SETUP.md**](./SETUP.md) guide.
 
 ```bash
 # Clone the repo

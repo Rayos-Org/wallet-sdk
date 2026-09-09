@@ -1,4 +1,4 @@
-﻿# Getting Started
+# Getting Started
 
 This guide walks you through everything you need to set up and use `@rayos/wallet-sdk` — whether you are a consumer app developer or an SDK contributor.
 
@@ -105,6 +105,8 @@ await sdk.approveRecovery(walletAddress, proposal.id);
 ---
 
 ## Setting Up for SDK Development
+
+> 💡 For a comprehensive guide covering Stellar CLI configuration, Soroban contract bindings, local package linking, and troubleshooting, refer to [**SETUP.md**](../SETUP.md).
 
 ### 1. Clone
 
