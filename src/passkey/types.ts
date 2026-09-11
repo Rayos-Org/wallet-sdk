@@ -1,4 +1,4 @@
-﻿export interface PasskeyCredential {
+export interface PasskeyCredential {
   id: string;
   rawId: string;
   response: {
@@ -60,4 +60,9 @@ export interface PasskeySignOptions {
   timeout?: number;
   userVerification?: 'required' | 'preferred' | 'discouraged';
   rpId?: string;
+}
+
+export interface PasskeyProvider {
+  createCredential(options: PasskeyRegistrationOptions): Promise<PasskeyCredential>;
+  signTransaction(xdr: string, options: PasskeySignOptions): Promise<PasskeyAssertion>;
 }

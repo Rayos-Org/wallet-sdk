@@ -1,4 +1,4 @@
-﻿import { createCredential, signTransaction, PasskeyRegistrationOptions, PasskeySignOptions, PasskeyCredential, PasskeyAssertion } from './passkey/index.js';
+import { createCredential as defaultCreateCredential, signTransaction as defaultSignTransaction, PasskeyRegistrationOptions, PasskeySignOptions, PasskeyCredential, PasskeyAssertion, PasskeyProvider } from './passkey/index.js';
 import { WalletClient, PolicyClient, Signer, Asset, SpendLimit, SessionKey, SessionKeyOptions, RecoveryProposal } from './contracts/index.js';
 import { RelayClient, SubmitTransactionResponse } from './relay/index.js';
 import { SessionManager, StorageAdapter } from './session/index.js';
@@ -8,6 +8,7 @@ export interface WalletSdkConfig {
   rpcUrl: string;
   relayUrl: string;
   storage?: StorageAdapter;
+  passkeyProvider?: PasskeyProvider;
 }
 
 export interface WalletState {
@@ -22,19 +23,24 @@ export class WalletSdk {
   private policyClient: PolicyClient;
   private relayClient: RelayClient;
   private sessionManager: SessionManager;
+  private passkeyProvider: PasskeyProvider;
 
   constructor(config: WalletSdkConfig) {
     this.walletClient = new WalletClient(config.networkPassphrase, config.rpcUrl);
     this.policyClient = new PolicyClient(config.networkPassphrase, config.rpcUrl);
     this.relayClient = new RelayClient(config.relayUrl);
     this.sessionManager = new SessionManager(this.policyClient, config.storage);
+    this.passkeyProvider = config.passkeyProvider || {
+      createCredential: defaultCreateCredential,
+      signTransaction: defaultSignTransaction,
+    };
   }
 
   /**
    * Full onboarding flow: Registers a passkey, predicts the address, and deploys the wallet.
    */
   public async createWallet(options: PasskeyRegistrationOptions, saltBytes: Uint8Array): Promise<{ address: string; credential: PasskeyCredential }> {
-    const credential = await createCredential(options);
+    const credential = await this.passkeyProvider.createCredential(options);
     const predictedAddress = this.walletClient.predictAddress(saltBytes);
     
     // In a real implementation we would sign the deploy tx and send to relay
@@ -51,7 +57,7 @@ export class WalletSdk {
     // const sponsored = await this.relayClient.sponsorTransaction({ transaction: xdr });
     
     // 2. Sign the transaction
-    const assertion = await signTransaction(xdr, options);
+    const assertion = await this.passkeyProvider.signTransaction(xdr, options);
     
     if (!assertion.signedXdr) {
       throw new Error('Failed to sign transaction');
@@ -112,5 +118,6 @@ export type {
   SessionKeyOptions,
   RecoveryProposal,
   StorageAdapter,
-  SubmitTransactionResponse
+  SubmitTransactionResponse,
+  PasskeyProvider
 };
