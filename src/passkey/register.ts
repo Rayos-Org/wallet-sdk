@@ -1,31 +1,41 @@
-﻿import { startRegistration } from '@simplewebauthn/browser';
+import { startRegistration } from '@simplewebauthn/browser';
 import { PasskeyCredential, PasskeyRegistrationOptions } from './types.js';
+import { publicKeyFromAttestationObject } from './encoding.js';
 
+/** Browser passkey registration. Prefers the platform authenticator (Windows Hello / Touch ID / Android). */
 export async function createCredential(options: PasskeyRegistrationOptions): Promise<PasskeyCredential> {
+  let credential;
   try {
-    const creationOptions: any = {
-      challenge: options.challenge,
-      rp: options.rp,
-      user: options.user,
-      pubKeyCredParams: options.pubKeyCredParams || [
-        { alg: -7, type: 'public-key' },
-        { alg: -257, type: 'public-key' }
-      ],
-      timeout: options.timeout || 60000,
-      authenticatorSelection: options.authenticatorSelection || {
-        residentKey: 'required',
-        userVerification: 'required',
-      },
-      attestation: options.attestation || 'none',
-    };
-
-    const credential = await startRegistration(creationOptions);
-
-    return {
-      ...credential,
-      publicKeyBytes: new Uint8Array(32),
-    } as PasskeyCredential;
+    credential = await startRegistration({
+      optionsJSON: {
+        challenge: options.challenge,
+        rp: options.rp,
+        user: options.user,
+        pubKeyCredParams: options.pubKeyCredParams || [{ alg: -7, type: 'public-key' }],
+        timeout: options.timeout || 60000,
+        authenticatorSelection: {
+          authenticatorAttachment: 'platform',
+          residentKey: 'required',
+          userVerification: 'required',
+          ...options.authenticatorSelection,
+        },
+        attestation: options.attestation || 'none',
+      } as any,
+    });
   } catch (error) {
     throw new Error(`Failed to create passkey credential: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
+
+  return {
+    id: credential.id,
+    rawId: credential.rawId,
+    type: 'public-key',
+    authenticatorAttachment: credential.authenticatorAttachment,
+    clientExtensionResults: credential.clientExtensionResults ?? {},
+    response: {
+      clientDataJSON: credential.response.clientDataJSON,
+      attestationObject: credential.response.attestationObject,
+    },
+    publicKeyBytes: publicKeyFromAttestationObject(credential.response.attestationObject),
+  };
 }

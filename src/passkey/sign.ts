@@ -1,28 +1,31 @@
-﻿import { startAuthentication } from '@simplewebauthn/browser';
-import { PasskeyAssertion, PasskeySignOptions } from './types.js';
+import { startAuthentication } from '@simplewebauthn/browser';
+import { PasskeyAssertion, PasskeyAssertionOptions } from './types.js';
 
-export async function signTransaction(xdr: string, options: PasskeySignOptions): Promise<PasskeyAssertion> {
+/** Browser passkey assertion over an arbitrary (base64url) challenge. */
+export async function getAssertion(options: PasskeyAssertionOptions): Promise<PasskeyAssertion> {
   try {
-    const authOptions: any = {
-      challenge: options.challenge,
-      allowCredentials: [
-        {
-          id: options.credentialId,
-          type: 'public-key',
-        },
-      ],
-      timeout: options.timeout || 60000,
-      userVerification: options.userVerification || 'required',
-      rpId: options.rpId,
-    };
-
-    const assertion = await startAuthentication(authOptions);
-
+    const assertion = await startAuthentication({
+      optionsJSON: {
+        challenge: options.challenge,
+        allowCredentials: options.credentialId ? [{ id: options.credentialId, type: 'public-key' }] : [],
+        timeout: options.timeout || 60000,
+        userVerification: options.userVerification || 'required',
+        rpId: options.rpId,
+      } as any,
+    });
     return {
-      ...assertion,
-      signedXdr: xdr,
-    } as PasskeyAssertion;
+      id: assertion.id,
+      rawId: assertion.rawId,
+      type: 'public-key',
+      clientExtensionResults: assertion.clientExtensionResults ?? {},
+      response: {
+        authenticatorData: assertion.response.authenticatorData,
+        clientDataJSON: assertion.response.clientDataJSON,
+        signature: assertion.response.signature,
+        userHandle: assertion.response.userHandle,
+      },
+    };
   } catch (error) {
-    throw new Error(`Failed to sign transaction with passkey: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    throw new Error(`Failed to sign with passkey: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }

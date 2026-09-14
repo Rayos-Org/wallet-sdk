@@ -1,4 +1,4 @@
-﻿import { Buffer } from "buffer";
+import { Buffer } from "buffer";
 import { Address } from "@stellar/stellar-sdk";
 import {
   AssembledTransaction,
@@ -31,17 +31,26 @@ if (typeof window !== "undefined") {
 }
 
 
-export const networks = {
-  testnet: {
-    networkPassphrase: "Test SDF Network ; September 2015",
-    contractId: "CAIIUPVI5VO2BCXKPUIRZX4BW4YQ6G6FWPJEWVKIVRN4H3KWJTUV3VXM",
-  }
-} as const
+
 
 
 export interface WebAuthnSignature {
-  credential_id: Buffer;
-  signature: Buffer;
+  /**
+ * `authenticatorData` from the WebAuthn assertion.
+ */
+authenticator_data: Buffer;
+  /**
+ * `clientDataJSON` from the WebAuthn assertion (UTF-8 bytes).
+ */
+client_data_json: Buffer;
+  /**
+ * Raw credential id (rawId) of the passkey that produced the signature.
+ */
+credential_id: Buffer;
+  /**
+ * Raw `r || s` (64 bytes). DER signatures must be converted client-side.
+ */
+signature: Buffer;
 }
 
 export const ContractError = {
@@ -113,7 +122,7 @@ export class Client extends ContractClient {
         "AAAAAAAAAAAAAAAMX19jaGVja19hdXRoAAAAAwAAAAAAAAARc2lnbmF0dXJlX3BheWxvYWQAAAAAAAPuAAAAIAAAAAAAAAAJc2lnbmF0dXJlAAAAAAAH0AAAABFXZWJBdXRoblNpZ25hdHVyZQAAAAAAAAAAAAANYXV0aF9jb250ZXh0cwAAAAAAA+oAAAfQAAAAB0NvbnRleHQAAAAAAQAAA+kAAAACAAAH0AAAAA1Db250cmFjdEVycm9yAAAA",
         "AAAAAAAAAAAAAAANcmVtb3ZlX3NpZ25lcgAAAAAAAAEAAAAAAAAADWNyZWRlbnRpYWxfaWQAAAAAAAAOAAAAAQAAA+kAAAACAAAH0AAAAA1Db250cmFjdEVycm9yAAAA",
         "AAAAAAAAAAAAAAAOcmVjb3Zlcl9zaWduZXIAAAAAAAIAAAAAAAAADWNyZWRlbnRpYWxfaWQAAAAAAAAOAAAAAAAAAApwdWJsaWNfa2V5AAAAAAAOAAAAAQAAA+kAAAACAAAH0AAAAA1Db250cmFjdEVycm9yAAAA",
-        "AAAAAQAAAAAAAAAAAAAAEVdlYkF1dGhuU2lnbmF0dXJlAAAAAAAAAgAAAAAAAAANY3JlZGVudGlhbF9pZAAAAAAAAA4AAAAAAAAACXNpZ25hdHVyZQAAAAAAA+4AAABA",
+        "AAAAAQAAAAAAAAAAAAAAEVdlYkF1dGhuU2lnbmF0dXJlAAAAAAAABAAAADBgYXV0aGVudGljYXRvckRhdGFgIGZyb20gdGhlIFdlYkF1dGhuIGFzc2VydGlvbi4AAAASYXV0aGVudGljYXRvcl9kYXRhAAAAAAAOAAAAO2BjbGllbnREYXRhSlNPTmAgZnJvbSB0aGUgV2ViQXV0aG4gYXNzZXJ0aW9uIChVVEYtOCBieXRlcykuAAAAABBjbGllbnRfZGF0YV9qc29uAAAADgAAAEVSYXcgY3JlZGVudGlhbCBpZCAocmF3SWQpIG9mIHRoZSBwYXNza2V5IHRoYXQgcHJvZHVjZWQgdGhlIHNpZ25hdHVyZS4AAAAAAAANY3JlZGVudGlhbF9pZAAAAAAAAA4AAABGUmF3IGByIHx8IHNgICg2NCBieXRlcykuIERFUiBzaWduYXR1cmVzIG11c3QgYmUgY29udmVydGVkIGNsaWVudC1zaWRlLgAAAAAACXNpZ25hdHVyZQAAAAAAA+4AAABA",
         "AAAABAAAAAAAAAAAAAAADUNvbnRyYWN0RXJyb3IAAAAAAAAIAAAAAAAAAA5Ob3RJbml0aWFsaXplZAAAAAAAAQAAAAAAAAASQWxyZWFkeUluaXRpYWxpemVkAAAAAAACAAAAAAAAABBJbnZhbGlkU2lnbmF0dXJlAAAAAwAAAAAAAAAOU2lnbmVyTm90Rm91bmQAAAAAAAQAAAAAAAAAE1NpZ25lckFscmVhZHlFeGlzdHMAAAAABQAAAAAAAAAMVW5hdXRob3JpemVkAAAABgAAAAAAAAAQUG9saWN5Q2FsbEZhaWxlZAAAAAcAAAAAAAAAFkNhbm5vdFJlbW92ZUxhc3RTaWduZXIAAAAAAAg=",
         "AAAAAgAAAAAAAAAAAAAAB0RhdGFLZXkAAAAAAgAAAAAAAAAAAAAAB1NpZ25lcnMAAAAAAAAAAAAAAAANUG9saWN5QWRkcmVzcwAAAA==" ]),
       options
