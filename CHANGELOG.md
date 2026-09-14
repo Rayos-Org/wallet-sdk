@@ -1,5 +1,22 @@
 ﻿# Changelog
 
+## 0.2.0 — 2026-09-14
+
+### Breaking
+- All placeholder/mocked paths removed. `WalletSdk` now requires `factoryContractId`
+  and accepts `rpId` / `passkeyProvider` / `nativeTokenContractId`.
+- `signTransaction` / policy / session-key placeholders removed;
+  `signAndSubmit` is deprecated and only accepts a real transaction XDR.
+
+### Added
+- `registerPasskey`, `deployWallet`, `predictAddress`, `getWalletState`
+  (`exists`), `getRecentTransfers` (Soroban events), `transfer` (passkey-signed
+  Soroban auth entries, V1 + V2 credentials), `requestFaucet`,
+  `getTransactionStatus`, `relayInfo`, `getAssertion`.
+- `PasskeyProvider` seam for React Native; `publicKeyFromAttestationObject`
+  (CBOR/COSE), `derSignatureToRaw`, `normaliseLowS`.
+- Testnet integration + end-to-end tests with a WebCrypto software authenticator.
+
 ## 0.1.1
 
 ### Patch Changes

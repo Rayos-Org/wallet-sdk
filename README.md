@@ -16,10 +16,10 @@
 
 `@rayos/wallet-sdk` is the **single source of truth** for how client applications (web dashboards, mobile apps, demo apps) interact with the Guardian Wallet ecosystem. It wraps:
 
-- **WebAuthn / Passkey** registration and signing via `@simplewebauthn/browser`
-- **On-chain contract calls** (wallet deployment, signer management, recovery)
-- **Policy management** (spend limits, session keys)
-- **Relay backend communication** (fee-sponsored transaction submission)
+- **WebAuthn / Passkey** registration and assertion (browser via `@simplewebauthn/browser`, or a custom `PasskeyProvider` for React Native)
+- **On-chain reads** over Soroban RPC (wallet existence, signers, native balance, transfer history from events)
+- **Passkey-signed transfers**: builds the Soroban `transfer`, has the passkey sign the wallet's authorization entry, and hands the result to the relay
+- **Relay backend communication** (wallet deployment, fee-sponsored submission, testnet faucet)
 
 Apps should **never** call contract bindings or WebAuthn APIs directly — everything goes through this SDK.
 
@@ -66,26 +66,39 @@ import { WalletSdk } from '@rayos/wallet-sdk';
 const sdk = new WalletSdk({
   networkPassphrase: 'Test SDF Network ; September 2015',
   rpcUrl: 'https://soroban-testnet.stellar.org',
-  relayUrl: 'https://relay.your-org.dev',
+  relayUrl: 'https://relay.your-org.dev/api',
+  factoryContractId: 'CCCAMWJOF7IYTVCU7SR6HFTNH5XRMDMWPYN464NY5BCKUPMUM64RZ5CH',
+  rpId: 'your-app.com',
 });
 
-// 1. Create a wallet (register passkey + deploy contract)
-const { address, credential } = await sdk.createWallet({
-  challenge: await fetchChallengeFromServer(),
-  rp: { id: 'your-app.com', name: 'Your App' },
-  user: { id: userId, name: userEmail, displayName: userName },
-}, crypto.getRandomValues(new Uint8Array(32)));
+// 1. Register a passkey (options come from relay POST /webauthn/register/options)
+const credential = await sdk.registerPasskey(options);
+// credential.publicKeyBytes is the 65-byte P-256 key extracted from the attestation
 
-// 2. Sign and submit a transaction
-const result = await sdk.signAndSubmit(unsignedXdr, {
-  challenge: txHash,
+// 2. Deploy the wallet contract — the relay's sponsor account pays
+const salt = crypto.getRandomValues(new Uint8Array(32));
+const { address, txHash } = await sdk.deployWallet({ salt, credential });
+
+// 3. Read on-chain state (Soroban RPC, no relay involved)
+const state = await sdk.getWalletState(address); // { address, exists, signers, balance }
+await sdk.requestFaucet(address);                 // testnet only
+
+// 4. Send XLM: passkey signs the wallet's Soroban auth entry, relay pays the fee
+const res = await sdk.transfer({
+  walletAddress: address,
+  to: 'G...',
+  amount: 10_000_000n, // stroops
   credentialId: credential.id,
 });
+console.log(res.txHash, res.status); // real testnet hash
 
-// 3. Get wallet state
-const state = await sdk.getWalletState(address, { contractId: USDC_CONTRACT_ID });
-console.log(`Balance: ${state.balance}`);
+// 5. History from contract events
+const transfers = await sdk.getRecentTransfers(address, 25);
 ```
+
+`createWallet(options, salt)` does steps 1–2 in one call. On React Native, pass a
+`passkeyProvider` (see `mobile-app/native/passkey-adapter.ts`) instead of relying
+on the browser default.
 
 ---
 
@@ -148,16 +161,14 @@ pnpm build
 ```
 wallet-sdk/
 ├── src/
-│   ├── passkey/            # WebAuthn registration & signing wrappers
+│   ├── passkey/            # WebAuthn registration/assertion, CBOR + DER + base64url encoding
 │   ├── contracts/
 │   │   ├── generated/      # Auto-generated Soroban bindings (do not edit)
-│   │   ├── wallet-client.ts
-│   │   ├── policy-client.ts
+│   │   ├── wallet-client.ts# RPC reads, auth-entry signing, transfer building
 │   │   └── errors.ts
 │   ├── relay/              # HTTP client for relay-backend
-│   ├── session/            # Session key lifecycle + StorageAdapter
-│   └── index.ts            # Public API surface
-├── tests/                  # Vitest unit tests
+│   └── index.ts            # Public API surface (WalletSdk)
+├── tests/                  # Vitest: unit, testnet integration, testnet e2e (software authenticator)
 ├── scripts/
 │   └── regenerate-bindings.sh
 ├── docs/                   # Extended documentation

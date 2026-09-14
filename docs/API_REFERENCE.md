@@ -1,12 +1,14 @@
-﻿# API Reference
+# API Reference — `@rayos/wallet-sdk` 0.2.0
 
-Complete documentation for the `@rayos/wallet-sdk` public API.
+Every method performs real network I/O against Soroban RPC and/or the relay backend. There are no mocked code paths.
 
 ---
 
 ## `WalletSdk` class
 
-The main entry point. Instantiate once and reuse across your app.
+```ts
+import { WalletSdk } from '@rayos/wallet-sdk';
+```
 
 ### Constructor
 
@@ -14,214 +16,118 @@ The main entry point. Instantiate once and reuse across your app.
 new WalletSdk(config: WalletSdkConfig)
 ```
 
-**`WalletSdkConfig`**
-
-| Property | Type | Required | Description |
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `networkPassphrase` | `string` | ✅ | Stellar network passphrase |
-| `rpcUrl` | `string` | ✅ | Soroban RPC endpoint URL |
-| `relayUrl` | `string` | ✅ | Relay backend base URL |
-| `storage` | `StorageAdapter` | ❌ | Custom session key storage (default: in-memory) |
+| `networkPassphrase` | `string` | ✅ | e.g. `Test SDF Network ; September 2015` |
+| `rpcUrl` | `string` | ✅ | Soroban RPC endpoint |
+| `relayUrl` | `string` | ✅ | relay-backend base URL **including `/api`** (or a same-origin proxy such as `/api`) |
+| `factoryContractId` | `string` | ✅ | `WalletFactory` contract (testnet: `CCCAMWJOF7IYTVCU7SR6HFTNH5XRMDMWPYN464NY5BCKUPMUM64RZ5CH`) |
+| `nativeTokenContractId` | `string` | ❌ | Native XLM SAC; defaults to `TESTNET_NATIVE_SAC` |
+| `rpId` | `string` | ❌ | WebAuthn relying-party id (must be the page's registrable domain on web) |
+| `passkeyProvider` | `PasskeyProvider` | ❌ | Platform passkey implementation; defaults to the browser (`@simplewebauthn/browser`) |
 
----
+### Onboarding
 
-### Methods
+#### `registerPasskey(options): Promise<PasskeyCredential>`
+Runs the WebAuthn registration ceremony with the options returned by the relay (`POST /webauthn/register/options`). The result carries `publicKeyBytes` — the 65-byte uncompressed P-256 key parsed from the attestation object (CBOR/COSE). Throws `WalletError('UNSUPPORTED_KEY')` if the authenticator did not produce an ES256 key.
 
-#### `createWallet(options, saltBytes)`
+#### `deployWallet(credential, saltBytes): Promise<{ address, txHash }>`
+Asks the relay to call `WalletFactory.deploy_wallet(salt, credential_id, public_key)`. The relay's sponsor account pays. `saltBytes` must be 32 bytes.
 
-Full onboarding flow: registers a passkey and deploys the GuardianWallet contract.
+#### `createWallet(options, saltBytes): Promise<CreateWalletResult>`
+`registerPasskey` + `deployWallet` in one call. Returns `{ address, credential, txHash }`.
 
+#### `predictAddress(saltBytes): Promise<string>`
+Simulates `WalletFactory.predict_address(salt)` so the wallet address is known before deployment.
+
+### Reads (Soroban RPC only)
+
+#### `getWalletState(walletAddress, asset?): Promise<WalletState>`
 ```ts
-sdk.createWallet(
-  options: PasskeyRegistrationOptions,
-  saltBytes: Uint8Array
-): Promise<{ address: string; credential: PasskeyCredential }>
-```
-
-**`PasskeyRegistrationOptions`**
-
-| Property | Type | Required | Description |
-|---|---|---|---|
-| `challenge` | `string` | ✅ | Server-generated challenge (base64url) |
-| `rp` | `{ id: string; name: string }` | ✅ | Relying party info |
-| `user` | `{ id: string; name: string; displayName: string }` | ✅ | User info |
-| `timeout` | `number` | ❌ | WebAuthn timeout in ms (default: 60000) |
-| `authenticatorSelection` | `object` | ❌ | Authenticator constraints |
-| `attestation` | `string` | ❌ | Attestation type (default: `"none"`) |
-
----
-
-#### `signAndSubmit(xdr, options)`
-
-Signs a Stellar transaction with a passkey and submits it through the relay.
-
-```ts
-sdk.signAndSubmit(
-  xdr: string,
-  options: PasskeySignOptions
-): Promise<SubmitTransactionResponse>
-```
-
-**`PasskeySignOptions`**
-
-| Property | Type | Required | Description |
-|---|---|---|---|
-| `challenge` | `string` | ✅ | Challenge — should be the transaction hash |
-| `credentialId` | `string` | ✅ | Passkey credential ID to authenticate with |
-| `timeout` | `number` | ❌ | WebAuthn timeout in ms |
-| `userVerification` | `string` | ❌ | `"required"` / `"preferred"` / `"discouraged"` |
-| `rpId` | `string` | ❌ | Relying party ID (defaults to current origin) |
-
-**`SubmitTransactionResponse`**
-
-| Property | Type | Description |
-|---|---|---|
-| `hash` | `string` | Submitted transaction hash |
-| `status` | `"pending" \| "success" \| "failed"` | Transaction status |
-
----
-
-#### `createSessionKey(walletAddress, options)`
-
-Creates and caches a session key for repeated low-risk actions.
-
-```ts
-sdk.createSessionKey(
-  walletAddress: string,
-  opts: SessionKeyOptions
-): Promise<SessionKey>
-```
-
-**`SessionKeyOptions`**
-
-| Property | Type | Required | Description |
-|---|---|---|---|
-| `publicKey` | `Uint8Array` | ✅ | Ephemeral public key for the session |
-| `expiresAt` | `number` | ✅ | Unix timestamp (ms) when session expires |
-| `allowedMethods` | `string[]` | ❌ | Whitelist of allowed contract methods |
-| `spendLimit` | `SpendLimit` | ❌ | Max spend per session |
-
-**`SessionKey`**
-
-| Property | Type | Description |
-|---|---|---|
-| `id` | `string` | Unique session key identifier |
-| `publicKey` | `Uint8Array` | The session public key |
-| `expiresAt` | `number` | Expiry timestamp |
-| `isActive` | `boolean` | Whether the session is still valid |
-
----
-
-#### `proposeRecovery(walletAddress, newSigner)`
-
-Proposes a guardian recovery — initiates the process of replacing a lost signer.
-
-```ts
-sdk.proposeRecovery(
-  walletAddress: string,
-  newSigner: Signer
-): Promise<RecoveryProposal>
-```
-
-**`Signer`**
-
-| Property | Type | Description |
-|---|---|---|
-| `publicKeyBytes` | `Uint8Array` | Raw public key bytes |
-| `weight` | `number` | Signing weight |
-
-**`RecoveryProposal`**
-
-| Property | Type | Description |
-|---|---|---|
-| `id` | `string` | Proposal ID |
-| `newSigner` | `Signer` | The proposed replacement signer |
-| `proposedAt` | `number` | Timestamp of proposal |
-| `status` | `"pending" \| "approved" \| "executed"` | Proposal state |
-
----
-
-#### `approveRecovery(walletAddress, proposalId)`
-
-Approves an existing recovery proposal (must be called by a current guardian).
-
-```ts
-sdk.approveRecovery(
-  walletAddress: string,
-  proposalId: string
-): Promise<void>
-```
-
----
-
-#### `getWalletState(walletAddress, asset)`
-
-Read-only aggregate: fetches balances, signers, and policies.
-
-```ts
-sdk.getWalletState(
-  walletAddress: string,
-  asset: Asset
-): Promise<WalletState>
-```
-
-**`Asset`**
-
-| Property | Type | Description |
-|---|---|---|
-| `contractId` | `string` | Token contract address (e.g., USDC on testnet) |
-
-**`WalletState`**
-
-| Property | Type | Description |
-|---|---|---|
-| `address` | `string` | The wallet contract address |
-| `signers` | `Signer[]` | Current registered signers |
-| `balance` | `bigint` | Token balance in stroops |
-
----
-
-## Error Types
-
-All SDK errors extend `SdkError` and have a typed `code` property:
-
-```ts
-import { WalletError, PolicyError } from '@rayos/wallet-sdk';
-
-try {
-  await sdk.signAndSubmit(xdr, options);
-} catch (err) {
-  if (err instanceof WalletError) {
-    console.error(err.code); // "UNAUTHORIZED" | "INVALID_SIGNATURE" | "UNKNOWN"
-  }
-  if (err instanceof PolicyError) {
-    console.error(err.code); // "SPEND_LIMIT_EXCEEDED" | "INVALID_SESSION" | "UNKNOWN"
-  }
+interface WalletState {
+  address: string;
+  signers: Signer[];   // from get_signers
+  balance: bigint;     // stroops, from the token contract's balance()
+  exists: boolean;     // false until the contract instance is on the ledger
 }
 ```
 
+#### `getBalance(address, asset?): Promise<bigint>` — stroops.
+#### `getSigners(walletAddress): Promise<Signer[]>`
+#### `getRecentTransfers(address, limit = 25): Promise<Transfer[]>`
+Reads `transfer` events of the native token contract that involve the address, paging through Soroban RPC `getEvents` from the retention window to the chain head.
+
+```ts
+interface Transfer {
+  at: string;        // ledger close time, ISO
+  ledger: number;
+  txHash: string;
+  from: string;
+  to: string;
+  amount: bigint;    // stroops
+  direction: 'in' | 'out';
+}
+```
+
+### Sending
+
+#### `transfer(params): Promise<SubmitTransactionResponse>`
+```ts
+interface TransferParams {
+  walletAddress: string;
+  to: string;           // G... or C...
+  amount: bigint;       // stroops
+  credentialId: string; // base64url id of the signing passkey
+  asset?: { contractId: string };
+}
+```
+1. Builds `token.transfer(wallet, to, amount)` with the relay sponsor as the transaction source and simulates it.
+2. For each `sorobanCredentialsAddress` auth entry belonging to the wallet, computes the Soroban auth-entry hash (V1 `envelopeTypeSorobanAuthorization` or V2 `HashIdPreimageSorobanAuthorizationWithAddress`) and uses it as the WebAuthn challenge.
+3. The passkey signs (platform authenticator prompt). The DER signature is converted to raw `r ‖ s` with low-S normalisation and placed, together with `authenticator_data`, `client_data_json` and `credential_id`, in the auth entry's signature map.
+4. Submits the XDR to the relay (`POST /relay/submit`), which re-simulates, signs the envelope and pays the fee.
+
+Resolves with `{ txHash, status }` for the real on-chain transaction.
+
+### Relay helpers
+
+- `requestFaucet(walletAddress): Promise<{ txHash, amount }>` — testnet only.
+- `getTransactionStatus(txHash): Promise<{ txHash, status }>` — `pending | success | failed | not_found`.
+- `relayInfo(): Promise<RelayInfo>` — `{ publicKey, networkPassphrase, factoryContractId, nativeTokenContractId, faucetAmount? }`.
+- `getAssertion(options): Promise<PasskeyAssertion>` — raw WebAuthn assertion for login ceremonies against the relay (`/webauthn/assert/*`).
+- `static credentialIdBytes(credentialId): Uint8Array`.
+
+#### `signAndSubmit(xdr, options)` — **deprecated**
+Submits an already-signed transaction XDR. Use `transfer()`.
+
 ---
 
-## `StorageAdapter` Interface
-
-Implement this to plug in custom session key storage (e.g., Secure Enclave on mobile):
+## `PasskeyProvider`
 
 ```ts
-interface StorageAdapter {
-  getItem(key: string): Promise<string | null>;
-  setItem(key: string, value: string): Promise<void>;
-  removeItem(key: string): Promise<void>;
+interface PasskeyProvider {
+  createCredential(options: PasskeyRegistrationOptions): Promise<PasskeyCredential>;
+  getAssertion(options: PasskeyAssertionOptions): Promise<PasskeyAssertion>;
 }
 ```
+The browser implementation is the default. React Native apps supply their own (see `mobile-app/native/passkey-adapter.ts`, built on `react-native-passkeys`). Both return standard WebAuthn JSON shapes; the SDK does all Stellar-specific work.
 
-**Example: `localStorage` adapter**
+`PasskeyAssertionOptions.challenge` is base64url. For on-chain authorisation it is the Soroban auth-entry hash — the wallet contract verifies that `clientDataJSON` carries exactly this value.
 
-```ts
-class LocalStorageAdapter implements StorageAdapter {
-  async getItem(key: string) { return localStorage.getItem(key); }
-  async setItem(key: string, value: string) { localStorage.setItem(key, value); }
-  async removeItem(key: string) { localStorage.removeItem(key); }
-}
+---
 
-const sdk = new WalletSdk({ ..., storage: new LocalStorageAdapter() });
-```
+## Encoding utilities (`export * from './passkey/encoding'`)
+
+`base64urlEncode/Decode`, `hexEncode/Decode`, `utf8Encode/Decode`, `decodeCbor`, `publicKeyFromAttestationObject`, `derSignatureToRaw`, `normaliseLowS`.
+
+---
+
+## Errors
+
+`WalletError extends SdkError` with `code`: `INVALID_SALT`, `UNSUPPORTED_KEY`, `INVALID_XDR`, `INVALID_ADDRESS`, `INVALID_AMOUNT`, `SIMULATION_FAILED`, `UNEXPECTED_RESULT`, `AUTH_REJECTED` (the wallet contract rejected the passkey signature during re-simulation). Relay HTTP failures throw a plain `Error` prefixed `Relay error (<status>)` carrying the relay's message.
+
+---
+
+## Lower-level clients
+
+- `sdk.wallet: WalletClient` — `predictAddress`, `walletExists`, `getSigners`, `getBalance`, `getRecentTransfers`, `buildSignedTransfer`, `static isTransaction`.
+- `sdk.relay: RelayClient` — `info`, `deployWallet`, `submitTransaction`, `faucet`, `status`.
