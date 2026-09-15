@@ -47,7 +47,7 @@
   },
   "types": "./dist/index.d.ts",
   "engines": {
-    "node": ">=24"
+    "node": ">=22.13.0"
   },
   "author": "Rayos Org",
   "homepage": "https://github.com/Rayos-Org/wallet-sdk#readme",
