@@ -1,3 +1,4 @@
+import { Address, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import {
   createCredential as browserCreateCredential,
   getAssertion as browserGetAssertion,
@@ -12,7 +13,15 @@ import type {
 } from './passkey/types.js';
 import { base64urlDecode, hexEncode } from './passkey/encoding.js';
 import { WalletClient, TESTNET_NATIVE_SAC } from './contracts/wallet-client.js';
-import type { Asset, Signer, Transfer } from './contracts/wallet-client.js';
+import type {
+  Asset,
+  Signer,
+  Transfer,
+  InvokeParams,
+  SpendLimit,
+  RecoveryProposal,
+  ProposalStatus,
+} from './contracts/wallet-client.js';
 import { RelayClient } from './relay/client.js';
 import type { RelayInfo, SubmitTransactionResponse } from './relay/types.js';
 import { WalletError } from './contracts/errors.js';
@@ -25,6 +34,7 @@ export interface WalletSdkConfig {
   factoryContractId: string;
   /** Defaults to the testnet native XLM SAC. */
   nativeTokenContractId?: string;
+  policyContractId?: string;
   /** WebAuthn relying-party id (must match the page origin on web). */
   rpId?: string;
   /** Platform passkey implementation; defaults to the browser one. */
@@ -67,13 +77,16 @@ export class WalletSdk {
   readonly relay: RelayClient;
   private readonly passkey: PasskeyProvider;
   private readonly rpId?: string;
+  readonly policyContractId?: string;
 
   constructor(config: WalletSdkConfig) {
+    this.policyContractId = config.policyContractId;
     this.wallet = new WalletClient({
       networkPassphrase: config.networkPassphrase,
       rpcUrl: config.rpcUrl,
       factoryContractId: config.factoryContractId,
       nativeTokenContractId: config.nativeTokenContractId,
+      policyContractId: config.policyContractId,
     });
     this.relay = new RelayClient(config.relayUrl);
     this.rpId = config.rpId;
@@ -174,6 +187,273 @@ export class WalletSdk {
     return this.relay.submitTransaction({ signedXdr });
   }
 
+  /**
+   * Generic contract invocation using the wallet's passkey and submitted via relay.
+   */
+  public async invokeWithPasskey(
+    params: Omit<InvokeParams, 'sponsorPublicKey' | 'passkey' | 'rpId'> & { passkey?: PasskeyProvider }
+  ): Promise<SubmitTransactionResponse> {
+    const info = await this.relay.info();
+    const signedXdr = await this.wallet.buildSignedInvocation({
+      ...params,
+      sponsorPublicKey: info.publicKey,
+      passkey: params.passkey ?? this.passkey,
+      rpId: this.rpId,
+    });
+    return this.relay.submitTransaction({ signedXdr });
+  }
+
+  /**
+   * Set a per-window spend limit for a token on the wallet's policy contract.
+   */
+  public async setSpendLimit(params: {
+    walletAddress: string;
+    tokenAddress: string;
+    amount: bigint;
+    windowSecs: bigint;
+    credentialId: string;
+    policyContractId?: string;
+  }): Promise<SubmitTransactionResponse> {
+    const policyId = params.policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    return this.invokeWithPasskey({
+      walletAddress: params.walletAddress,
+      contractId: policyId,
+      method: 'set_spend_limit',
+      args: [
+        new Address(params.walletAddress).toScVal(),
+        new Address(params.tokenAddress).toScVal(),
+        nativeToScVal(params.amount, { type: 'i128' }),
+        nativeToScVal(params.windowSecs, { type: 'u64' }),
+      ],
+      credentialId: params.credentialId,
+    });
+  }
+
+  /**
+   * Read the configured spend limit for a token.
+   */
+  public getSpendLimit(
+    walletAddress: string,
+    tokenAddress: string,
+    policyContractId?: string
+  ): Promise<SpendLimit | null> {
+    return this.wallet.getSpendLimit(walletAddress, tokenAddress, policyContractId ?? this.policyContractId);
+  }
+
+  /**
+   * Add a recovery guardian to the wallet's policy contract.
+   */
+  public async addGuardian(params: {
+    walletAddress: string;
+    guardianAddress: string;
+    credentialId: string;
+    policyContractId?: string;
+  }): Promise<SubmitTransactionResponse> {
+    const policyId = params.policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    return this.invokeWithPasskey({
+      walletAddress: params.walletAddress,
+      contractId: policyId,
+      method: 'add_guardian',
+      args: [
+        new Address(params.walletAddress).toScVal(),
+        new Address(params.guardianAddress).toScVal(),
+      ],
+      credentialId: params.credentialId,
+    });
+  }
+
+  /**
+   * Remove a recovery guardian from the wallet's policy contract.
+   */
+  public async removeGuardian(params: {
+    walletAddress: string;
+    guardianAddress: string;
+    credentialId: string;
+    policyContractId?: string;
+  }): Promise<SubmitTransactionResponse> {
+    const policyId = params.policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    return this.invokeWithPasskey({
+      walletAddress: params.walletAddress,
+      contractId: policyId,
+      method: 'remove_guardian',
+      args: [
+        new Address(params.walletAddress).toScVal(),
+        new Address(params.guardianAddress).toScVal(),
+      ],
+      credentialId: params.credentialId,
+    });
+  }
+
+  /**
+   * Check if an address is a guardian for a wallet.
+   */
+  public isGuardian(
+    walletAddress: string,
+    guardianAddress: string,
+    policyContractId?: string
+  ): Promise<boolean> {
+    return this.wallet.isGuardian(walletAddress, guardianAddress, policyContractId ?? this.policyContractId);
+  }
+
+  /**
+   * Set recovery threshold (number of guardian approvals required).
+   */
+  public async setRecoveryThreshold(params: {
+    walletAddress: string;
+    threshold: number;
+    credentialId: string;
+    policyContractId?: string;
+  }): Promise<SubmitTransactionResponse> {
+    const policyId = params.policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    return this.invokeWithPasskey({
+      walletAddress: params.walletAddress,
+      contractId: policyId,
+      method: 'set_recovery_threshold',
+      args: [
+        new Address(params.walletAddress).toScVal(),
+        nativeToScVal(params.threshold, { type: 'u32' }),
+      ],
+      credentialId: params.credentialId,
+    });
+  }
+
+  /**
+   * Set recovery timelock delay in seconds.
+   */
+  public async setRecoveryTimelock(params: {
+    walletAddress: string;
+    delaySecs: bigint;
+    credentialId: string;
+    policyContractId?: string;
+  }): Promise<SubmitTransactionResponse> {
+    const policyId = params.policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    return this.invokeWithPasskey({
+      walletAddress: params.walletAddress,
+      contractId: policyId,
+      method: 'set_recovery_timelock',
+      args: [
+        new Address(params.walletAddress).toScVal(),
+        nativeToScVal(params.delaySecs, { type: 'u64' }),
+      ],
+      credentialId: params.credentialId,
+    });
+  }
+
+  /**
+   * Propose a recovery with a new passkey credential.
+   */
+  public async proposeRecovery(params: {
+    walletAddress: string;
+    guardianAddress: string;
+    guardianCredentialId: string;
+    newCredentialId: string;
+    newPublicKeyBytes: Uint8Array;
+    policyContractId?: string;
+  }): Promise<SubmitTransactionResponse> {
+    const policyId = params.policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    return this.invokeWithPasskey({
+      walletAddress: params.walletAddress,
+      contractId: policyId,
+      method: 'propose_recovery',
+      args: [
+        new Address(params.walletAddress).toScVal(),
+        new Address(params.guardianAddress).toScVal(),
+        xdr.ScVal.scvBytes(base64urlDecode(params.newCredentialId)),
+        xdr.ScVal.scvBytes(params.newPublicKeyBytes),
+      ],
+      credentialId: params.guardianCredentialId,
+    });
+  }
+
+  /**
+   * Guardian approves an active recovery proposal.
+   */
+  public async approveRecovery(params: {
+    walletAddress: string;
+    guardianAddress: string;
+    guardianCredentialId: string;
+    proposalId: bigint;
+    policyContractId?: string;
+  }): Promise<SubmitTransactionResponse> {
+    const policyId = params.policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    return this.invokeWithPasskey({
+      walletAddress: params.walletAddress,
+      contractId: policyId,
+      method: 'approve_recovery',
+      args: [
+        new Address(params.walletAddress).toScVal(),
+        new Address(params.guardianAddress).toScVal(),
+        nativeToScVal(params.proposalId, { type: 'u64' }),
+      ],
+      credentialId: params.guardianCredentialId,
+    });
+  }
+
+  /**
+   * Permissionless execution of an approved recovery after timelock expiration.
+   */
+  public async executeRecovery(params: {
+    walletAddress: string;
+    proposalId: bigint;
+    policyContractId?: string;
+  }): Promise<SubmitTransactionResponse> {
+    const policyId = params.policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    const info = await this.relay.info();
+    const signedXdr = await this.wallet.buildSignedInvocation({
+      walletAddress: params.walletAddress,
+      contractId: policyId,
+      method: 'execute_recovery',
+      args: [
+        new Address(params.walletAddress).toScVal(),
+        nativeToScVal(params.proposalId, { type: 'u64' }),
+      ],
+      sponsorPublicKey: info.publicKey,
+    });
+    return this.relay.submitTransaction({ signedXdr });
+  }
+
+  /**
+   * Cancel an active recovery proposal (callable by the wallet owner).
+   */
+  public async cancelRecovery(params: {
+    walletAddress: string;
+    proposalId: bigint;
+    credentialId: string;
+    policyContractId?: string;
+  }): Promise<SubmitTransactionResponse> {
+    const policyId = params.policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    return this.invokeWithPasskey({
+      walletAddress: params.walletAddress,
+      contractId: policyId,
+      method: 'cancel_recovery',
+      args: [
+        new Address(params.walletAddress).toScVal(),
+        nativeToScVal(params.proposalId, { type: 'u64' }),
+      ],
+      credentialId: params.credentialId,
+    });
+  }
+
+  /**
+   * Query the status of a recovery proposal on-chain.
+   */
+  public getRecoveryStatus(
+    walletAddress: string,
+    proposalId: bigint,
+    policyContractId?: string
+  ): Promise<RecoveryProposal | null> {
+    return this.wallet.getRecoveryStatus(walletAddress, proposalId, policyContractId ?? this.policyContractId);
+  }
+
   /** Testnet: ask the relay to send XLM to the wallet. */
   public requestFaucet(walletAddress: string) {
     return this.relay.faucet(walletAddress);
@@ -216,6 +496,10 @@ export type {
   Asset,
   Signer,
   Transfer,
+  InvokeParams,
+  SpendLimit,
+  RecoveryProposal,
+  ProposalStatus,
   PasskeyAssertion,
   PasskeyAssertionOptions,
   PasskeyCredential,

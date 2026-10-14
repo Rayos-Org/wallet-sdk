@@ -43,6 +43,34 @@ export interface Transfer {
   direction: 'in' | 'out';
 }
 
+export interface SpendLimit {
+  amount: bigint;
+  windowSecs: bigint;
+  currentAccumulated: bigint;
+  currentWindowStart: bigint;
+}
+
+export type ProposalStatus = 'active' | 'executed' | 'cancelled';
+
+export interface RecoveryProposal {
+  newCredentialId: string;
+  newPublicKeyBytes: Uint8Array;
+  approvals: string[];
+  status: ProposalStatus;
+  executeAfter: bigint;
+}
+
+export interface InvokeParams {
+  walletAddress: string;
+  contractId: string;
+  method: string;
+  args?: xdr.ScVal[];
+  sponsorPublicKey: string;
+  passkey?: PasskeyProvider;
+  credentialId?: string;
+  rpId?: string;
+}
+
 /** Native XLM Stellar Asset Contract on testnet. */
 export const TESTNET_NATIVE_SAC = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
 
@@ -54,6 +82,7 @@ export interface WalletClientConfig {
   rpcUrl: string;
   factoryContractId: string;
   nativeTokenContractId?: string;
+  policyContractId?: string;
 }
 
 /**
@@ -65,11 +94,13 @@ export class WalletClient {
   readonly networkPassphrase: string;
   readonly factoryContractId: string;
   readonly nativeTokenContractId: string;
+  readonly policyContractId?: string;
 
   constructor(config: WalletClientConfig) {
     this.networkPassphrase = config.networkPassphrase;
     this.factoryContractId = config.factoryContractId;
     this.nativeTokenContractId = config.nativeTokenContractId ?? TESTNET_NATIVE_SAC;
+    this.policyContractId = config.policyContractId;
     this.server = new rpc.Server(config.rpcUrl, { allowHttp: config.rpcUrl.startsWith('http://') });
   }
 
@@ -199,6 +230,59 @@ export class WalletClient {
   /* ── writes ────────────────────────────────────────────────────── */
 
   /**
+   * Generic contract invocation with Soroban passkey authorization and relay sponsorship.
+   * Simulates the call, signs the wallet authorization entry using the passkey,
+   * re-simulates with the signature to record footprints, and returns the assembled transaction XDR.
+   */
+  public async buildSignedInvocation(params: InvokeParams): Promise<string> {
+    const { walletAddress, contractId, method, args = [], sponsorPublicKey, passkey, credentialId, rpId } = params;
+    if (!StrKey.isValidContract(walletAddress)) throw new WalletError('Invalid wallet address', 'INVALID_ADDRESS');
+    if (!StrKey.isValidContract(contractId)) throw new WalletError('Invalid contract address', 'INVALID_ADDRESS');
+
+    const contract = new Contract(contractId);
+    const source = await this.server.getAccount(sponsorPublicKey);
+
+    const tx = new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase: this.networkPassphrase })
+      .addOperation(contract.call(method, ...args))
+      .setTimeout(120)
+      .build();
+
+    const sim = await this.server.simulateTransaction(tx);
+    if (rpc.Api.isSimulationError(sim)) {
+      throw new WalletError(`Simulation of ${method} failed: ${sim.error}`, 'SIMULATION_FAILED');
+    }
+    if (!rpc.Api.isSimulationSuccess(sim) || !sim.result) {
+      throw new WalletError(`Simulation of ${method} returned no result`, 'SIMULATION_FAILED');
+    }
+
+    const latest = await this.server.getLatestLedger();
+    const validUntilLedger = latest.sequence + 60; // ≈ 5 minutes
+
+    const signedAuth = await Promise.all(
+      sim.result.auth.map((entry) => {
+        if (!passkey || !credentialId) return entry;
+        return this.signAuthEntry(entry, walletAddress, validUntilLedger, passkey, credentialId, rpId);
+      })
+    );
+
+    const op = tx.operations[0] as { func: xdr.HostFunction };
+    const rebuilt = new TransactionBuilder(await this.server.getAccount(sponsorPublicKey), {
+      fee: BASE_FEE,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(Operation.invokeHostFunction({ func: op.func, auth: signedAuth }))
+      .setTimeout(120)
+      .build();
+
+    const sim2 = await this.server.simulateTransaction(rebuilt);
+    if (rpc.Api.isSimulationError(sim2)) {
+      throw new WalletError(`Passkey authorisation rejected by contract: ${sim2.error}`, 'AUTH_REJECTED');
+    }
+    const assembled = rpc.assembleTransaction(rebuilt, sim2).build();
+    return assembled.toXDR();
+  }
+
+  /**
    * Builds an unsigned native-token `transfer(from=wallet, to, amount)` with
    * the sponsor as the transaction source, and signs the wallet's Soroban
    * authorisation entry with the passkey. Returns the transaction XDR ready
@@ -215,58 +299,106 @@ export class WalletClient {
     asset?: Asset;
   }): Promise<string> {
     const { walletAddress, to, amount, sponsorPublicKey, passkey, credentialId, rpId, asset } = params;
-    if (!StrKey.isValidContract(walletAddress)) throw new WalletError('Invalid wallet address', 'INVALID_ADDRESS');
     if (!StrKey.isValidEd25519PublicKey(to) && !StrKey.isValidContract(to)) {
       throw new WalletError('Recipient must be a G… account or C… contract address', 'INVALID_ADDRESS');
     }
     if (amount <= 0n) throw new WalletError('Amount must be positive', 'INVALID_AMOUNT');
 
-    const token = new Contract(asset?.contractId ?? this.nativeTokenContractId);
-    const source = await this.server.getAccount(sponsorPublicKey);
+    const tokenContractId = asset?.contractId ?? this.nativeTokenContractId;
+    return this.buildSignedInvocation({
+      walletAddress,
+      contractId: tokenContractId,
+      method: 'transfer',
+      args: [
+        new Address(walletAddress).toScVal(),
+        new Address(to).toScVal(),
+        nativeToScVal(amount, { type: 'i128' }),
+      ],
+      sponsorPublicKey,
+      passkey,
+      credentialId,
+      rpId,
+    });
+  }
 
-    const tx = new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase: this.networkPassphrase })
-      .addOperation(
-        token.call(
-          'transfer',
-          new Address(walletAddress).toScVal(),
-          new Address(to).toScVal(),
-          nativeToScVal(amount, { type: 'i128' })
-        )
-      )
-      .setTimeout(120)
-      .build();
-
-    const sim = await this.server.simulateTransaction(tx);
-    if (rpc.Api.isSimulationError(sim)) {
-      throw new WalletError(`Transfer simulation failed: ${sim.error}`, 'SIMULATION_FAILED');
+  /** Read the spend limit for a wallet and token. */
+  public async getSpendLimit(
+    walletAddress: string,
+    tokenAddress: string,
+    policyContractId?: string
+  ): Promise<SpendLimit | null> {
+    const policyId = policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    try {
+      const retval = await this.simulateRaw(
+        policyId,
+        'get_spend_limit',
+        new Address(walletAddress).toScVal(),
+        new Address(tokenAddress).toScVal()
+      );
+      if (retval.type === 'scvVoid') return null;
+      const native = scValToNative(retval);
+      if (!native) return null;
+      return {
+        amount: BigInt(native.amount),
+        windowSecs: BigInt(native.window_secs),
+        currentAccumulated: BigInt(native.current_accumulated),
+        currentWindowStart: BigInt(native.current_window_start),
+      };
+    } catch {
+      return null;
     }
-    if (!rpc.Api.isSimulationSuccess(sim) || !sim.result) {
-      throw new WalletError('Transfer simulation returned no result', 'SIMULATION_FAILED');
+  }
+
+  /** Check if an address is registered as a guardian for a wallet. */
+  public async isGuardian(
+    walletAddress: string,
+    guardianAddress: string,
+    policyContractId?: string
+  ): Promise<boolean> {
+    const policyId = policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    try {
+      const retval = await this.simulateRaw(
+        policyId,
+        'is_guardian',
+        new Address(walletAddress).toScVal(),
+        new Address(guardianAddress).toScVal()
+      );
+      return Boolean(scValToNative(retval));
+    } catch {
+      return false;
     }
+  }
 
-    const latest = await this.server.getLatestLedger();
-    const validUntilLedger = latest.sequence + 60; // ≈ 5 minutes
-
-    const signedAuth = await Promise.all(
-      sim.result.auth.map((entry) => this.signAuthEntry(entry, walletAddress, validUntilLedger, passkey, credentialId, rpId))
-    );
-
-    // Re-attach signed auth and re-simulate so the footprint/fees include __check_auth.
-    const op = tx.operations[0] as { func: xdr.HostFunction };
-    const rebuilt = new TransactionBuilder(await this.server.getAccount(sponsorPublicKey), {
-      fee: BASE_FEE,
-      networkPassphrase: this.networkPassphrase,
-    })
-      .addOperation(Operation.invokeHostFunction({ func: op.func, auth: signedAuth }))
-      .setTimeout(120)
-      .build();
-
-    const sim2 = await this.server.simulateTransaction(rebuilt);
-    if (rpc.Api.isSimulationError(sim2)) {
-      throw new WalletError(`Passkey authorisation rejected by the wallet contract: ${sim2.error}`, 'AUTH_REJECTED');
+  /** Query the status of a recovery proposal on-chain. */
+  public async getRecoveryStatus(
+    walletAddress: string,
+    proposalId: bigint,
+    policyContractId?: string
+  ): Promise<RecoveryProposal | null> {
+    const policyId = policyContractId ?? this.policyContractId;
+    if (!policyId) throw new WalletError('Policy contract ID not configured', 'CONFIG_ERROR');
+    try {
+      const retval = await this.simulateRaw(
+        policyId,
+        'get_recovery_status',
+        new Address(walletAddress).toScVal(),
+        nativeToScVal(proposalId, { type: 'u64' })
+      );
+      if (retval.type === 'scvVoid') return null;
+      const native = scValToNative(retval);
+      if (!native) return null;
+      return {
+        newCredentialId: hexEncode(new Uint8Array(native.new_credential_id)),
+        newPublicKeyBytes: new Uint8Array(native.new_public_key),
+        approvals: (native.approvals ?? []).map((a: any) => String(a)),
+        status: typeof native.status === 'string' ? (native.status.toLowerCase() as ProposalStatus) : 'active',
+        executeAfter: BigInt(native.execute_after),
+      };
+    } catch {
+      return null;
     }
-    const assembled = rpc.assembleTransaction(rebuilt, sim2).build();
-    return assembled.toXDR();
   }
 
   /** Sign one SorobanAuthorizationEntry addressed to the wallet with a passkey assertion. */
